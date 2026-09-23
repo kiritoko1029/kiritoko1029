@@ -1,0 +1,98 @@
+3"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 20V4m-6 6 6-6 6 6"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v16m-6-6 6 6 6-6"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="m10 6 6 6-6 6"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M10 13h.01M14 13h4M6 16h12"/></symbol>
+  <symbol id="i-loader" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-8-8"/></symbol>
+</svg>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="brand-icon"><svg aria-hidden="true"><use href="#i-logo"/></svg></span><span class="brand-name">对照</span><span class="brand-sub">DIFF STUDIO</span></div>
+    <div class="privacy" title="所有计算均在浏览器内完成；不联网、不上传、不自动保存。"><svg aria-hidden="true"><use href="#i-shield"/></svg>本地处理，保护隐私</div>
+  </div>
+</header>
+<main>
+  <section class="hero" aria-labelledby="pageTitle">
+    <div><div class="eyebrow">LESS GUESSING. MORE CLARITY.</div><h1 id="pageTitle">文本差异，一目了然。</h1><p>粘贴文本或导入本地文件；大文本会自动切换为更省内存的对比策略。</p></div>
+    <div class="actions">
+      <button id="sampleBtn" class="btn" type="button"><svg aria-hidden="true"><use href="#i-file"/></svg>载入示例</button>
+      <button id="swapBtn" class="btn" type="button"><svg aria-hidden="true"><use href="#i-swap"/></svg>交换文本</button>
+      <button id="clearBtn" class="btn btn-plain btn-danger" type="button"><svg aria-hidden="true"><use href="#i-trash"/></svg>清空</button>
+    </div>
+  </section>
+  <section class="editors" aria-label="待对比文本">
+    <div id="leftEditor" class="editor">
+      <div class="editor-head"><label for="leftText" class="editor-title"><span class="letter" aria-hidden="true">A</span>原始文本</label><div class="editor-actions"><button id="importLeft" class="btn btn-plain" type="button" aria-label="从本地导入原始文本文件"><svg aria-hidden="true"><use href="#i-upload"/></svg>导入文件</button><button id="pasteLeft" class="btn btn-plain" type="button" aria-label="从剪贴板粘贴到原始文本"><svg aria-hidden="true"><use href="#i-paste"/></svg>粘贴</button></div></div>
+      <input id="leftFile" class="file-input" type="file" accept="text/*,.txt,.md,.csv,.json,.xml,.html,.htm,.css,.js,.mjs,.cjs,.ts,.tsx,.jsx,.vue,.svelte,.py,.java,.c,.cpp,.h,.hpp,.go,.rs,.php,.rb,.sh,.yaml,.yml,.toml,.ini,.conf,.log,.sql" aria-hidden="true">
+      <textarea id="leftText" placeholder="在这里粘贴原始文本…&#10;&#10;也可以点击“导入文件”，或把文本文件拖到这里。" spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="leftCount"></textarea>
+      <div class="editor-foot"><span id="leftSource" class="source-label">ORIGINAL</span><span id="leftCount" class="counter">0 字符 · 0 行</span></div>
+    </div>
+    <div id="rightEditor" class="editor">
+      <div class="editor-head"><label for="rightText" class="editor-title"><span class="letter letter-b" aria-hidden="true">B</span>修改后文本</label><div class="editor-actions"><button id="importRight" class="btn btn-plain" type="button" aria-label="从本地导入修改后文本文件"><svg aria-hidden="true"><use href="#i-upload"/></svg>导入文件</button><button id="pasteRight" class="btn btn-plain" type="button" aria-label="从剪贴板粘贴到修改后文本"><svg aria-hidden="true"><use href="#i-paste"/></svg>粘贴</button></div></div>
+      <input id="rightFile" class="file-input" type="file" accept="text/*,.txt,.md,.csv,.json,.xml,.html,.htm,.css,.js,.mjs,.cjs,.ts,.tsx,.jsx,.vue,.svelte,.py,.java,.c,.cpp,.h,.hpp,.go,.rs,.php,.rb,.sh,.yaml,.yml,.toml,.ini,.conf,.log,.sql" aria-hidden="true">
+      <textarea id="rightText" placeholder="在这里粘贴修改后的文本…&#10;&#10;也可以点击“导入文件”，或把文本文件拖到这里。" spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="rightCount"></textarea>
+      <div class="editor-foot"><span id="rightSource" class="source-label">MODIFIED</span><span id="rightCount" class="counter">0 字符 · 0 行</span></div>
+    </div>
+  </section>
+  <section class="settings" aria-label="对比设置">
+    <div class="settings-left">
+      <div class="mode" role="group" aria-label="对比粒度">
+        <label title="按行对齐，并在修改行内高亮具体字符"><input type="radio" name="mode" value="char" checked><span>字符级对比</span></label>
+        <label title="高亮整行，不细分行内的字符差异"><input type="radio" name="mode" value="line"><span>整行对比</span></label>
+      </div>
+      <label class="check" title="忽略空格、Tab、全角空格等行内空白；仍然比较换行与空行。"><input id="ignoreSpace" type="checkbox">忽略行内空白</label>
+      <label class="check" title="比较时忽略字母大小写，原文显示保持不变。"><input id="ignoreCase" type="checkbox">忽略大小写</label>
+    </div>
+    <button id="compareBtn" class="btn btn-primary" type="button"><svg id="compareIcon" aria-hidden="true"><use href="#i-compare"/></svg><span id="compareLabel">开始对比</span></button>
+  </section>
+  <div class="tip"><svg aria-hidden="true"><use href="#i-key"/></svg><span><kbd id="shortcutKey">Ctrl</kbd> + <kbd>Enter</kbd> 快速对比，<kbd>Esc</kbd> 取消</span><span aria-hidden="true">·</span><span>红色为原文删改，绿色为新文增改</span><span aria-hidden="true">·</span><span>超大文本自动降级字符细分，不截断原文</span></div>
+  <section id="emptyState" class="empty" aria-label="对比状态">
+    <div class="empty-icon"><svg aria-hidden="true"><use href="#i-compare"/></svg></div>
+    <h2 id="emptyTitle">差异将显示在这里</h2><p id="emptyDescription">分别粘贴文本、拖入文件，或者点击“导入文件”。</p>
+  </section>
+  <section id="results" class="results" aria-labelledby="resultTitle" hidden>
+    <div class="result-heading"><div class="result-title"><h2 id="resultTitle">对比结果</h2><span id="resultSubtitle" class="result-subtitle"></span></div><div class="exports"><button id="copyResultBtn" class="btn" type="button"><svg aria-hidden="true"><use href="#i-copy"/></svg>复制结果</button><button id="exportBtn" class="btn" type="button"><svg aria-hidden="true"><use href="#i-download"/></svg>导出 TXT</button></div></div>
+    <div class="summary" aria-label="行数统计">
+      <span class="stat stat-add">＋ 新增 <b id="addCount">0</b> 行</span><span class="stat stat-remove">－ 删除 <b id="removeCount">0</b> 行</span><span class="stat stat-change">↔ 修改 <b id="changeCount">0</b> 行</span><span class="stat">＝ 相同 <b id="equalCount">0</b> 行</span>
+    </div>
+    <div id="sameNotice" class="notice same-notice" hidden></div>
+    <div id="coarseNotice" class="notice" hidden>为保持响应速度，部分复杂片段使用了较粗粒度的差异标记。文本内容完整保留，但可能包含可进一步细分的相同内容。</div>
+    <div class="result-options"><div class="view-options"><label class="check"><input id="onlyDiff" type="checkbox">仅看差异</label><label class="check" title="· 表示空格，⇥ 表示 Tab，□ 表示全角空格，⍽ 表示不换行空格。"><input id="showWhitespace" type="checkbox">显示空白</label></div><div class="diff-nav"><button id="prevDiff" class="icon-btn" type="button" aria-label="上一处差异" title="上一处差异（Alt + ↑）"><svg aria-hidden="true"><use href="#i-up"/></svg></button><span id="navCount" class="nav-count">0 / 0 处差异</span><button id="nextDiff" class="icon-btn" type="button" aria-label="下一处差异" title="下一处差异（Alt + ↓）"><svg aria-hidden="true"><use href="#i-down"/></svg></button></div></div>
+    <div class="diff-columns"><span>A / 原始文本</span><span>B / 修改后文本</span></div>
+    <div id="diffScroll" class="diff-scroll" tabindex="0" aria-label="左右对比内容，可上下滚动"><div id="diffRows"></div></div>
+    <div class="result-bottom"><div class="legend"><span><i></i>删除 / 修改前</span><span><i class="green"></i>新增 / 修改后</span><span id="modeHint">深色标出行内差异</span></div><div class="pagination"><button id="prevPage" class="icon-btn" type="button" aria-label="上一页"><svg aria-hidden="true"><use href="#i-left"/></svg></button><span id="pageLabel" class="page-label"></span><button id="nextPage" class="icon-btn" type="button" aria-label="下一页"><svg aria-hidden="true"><use href="#i-right"/></svg></button></div></div>
+  </section>
+  <div id="liveStatus" class="sr-only" role="status" aria-live="polite"></div>
+</main>
+<footer><span>无需安装 · 无需联网 · 不自动保存，刷新页面将清空文本</span><span>不设固定字符/行数上限 · 实际容量取决于浏览器可用内存</span></footer>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script>
+'use strict';
+
+/**
+ * Standalone, offline diff engine.
+ *
+ * Large files are represented as compressed line blocks instead of one object
+ * per visible row. A bounded Myers diff handles small/nearby edits, while
+ * unique-line anchors split large regions into manageable pieces. When a
+ * pathological region cannot be aligned safely, it is kept intact and marked
+ * as a coarse change rather than freezing the browser.
+ */
+function createDiffEngine() {
+  const segmenter = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
+    ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+  const horizontalWhitespace = /[^\S\r\n]/gu;
+  const ANCHOR_THRESHOLD = 3000;
+  const ANCHOR_SCAN_LIMIT = 500000;
+
+  function emit(callback, stage, progress) {
+    if (typeof callback === 'function') callback({ stage, progress });
+  }
+
+  function normalize(text, options) {
+    let value = options.ignoreSpace ? text.replace(horizontalWhitespace, '') : text;
+    return options.ignoreCase ? value.toLowerCase() : value;
+  }
+
+  f
