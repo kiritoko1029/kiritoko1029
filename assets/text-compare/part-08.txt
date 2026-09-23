@@ -1,0 +1,139 @@
+Error('这个文件看起来不是普通文本文件。');
+    try {
+      return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes), encoding };
+    } catch (error) {
+      try { return { text: new TextDecoder('gb18030').decode(bytes), encoding: 'GB18030 / GBK' }; }
+      catch (fallbackError) { return { text: new TextDecoder('utf-8').decode(bytes), encoding: 'UTF-8（含替换字符）' }; }
+    }
+  }
+  function readLocalFile(file, side) {
+    if (!file) return;
+    const input = side === 'left' ? leftInput : rightInput;
+    const sourceLabel = $(side === 'left' ? 'leftSource' : 'rightSource');
+    const reader = new FileReader();
+    importing = true;
+    sourceLabel.textContent = `正在读取 ${file.name}…`;
+    sourceLabel.title = file.name;
+    reader.onprogress = event => {
+      if (event.lengthComputable) sourceLabel.textContent = `正在读取 ${file.name} · ${Math.round(event.loaded / event.total * 100)}%`;
+    };
+    reader.onerror = () => {
+      importing = false; updateSourceLabel(side);
+      toast(`无法读取“${file.name}”。`, true);
+    };
+    reader.onload = () => {
+      try {
+        const decoded = decodeTextBuffer(reader.result);
+        input.value = decoded.text;
+        sourceInfo[side] = { name: file.name, size: file.size, path: `${file.name} · ${decoded.encoding}` };
+        updateSourceLabel(side);
+        invalidate(`已导入 ${file.name}，点击「开始对比」计算差异。`);
+        scheduleCounts(true);
+        toast(`已导入 ${file.name}（${fileSize(file.size)}，${decoded.encoding}）。`);
+      } catch (error) {
+        sourceInfo[side] = null; updateSourceLabel(side);
+        toast(error.message || `无法读取“${file.name}”。`, true);
+      } finally { importing = false; }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+  function setupFileImport(side) {
+    const button = $(side === 'left' ? 'importLeft' : 'importRight');
+    const picker = $(side === 'left' ? 'leftFile' : 'rightFile');
+    const editor = $(side === 'left' ? 'leftEditor' : 'rightEditor');
+    button.addEventListener('click', () => { picker.value = ''; picker.click(); });
+    picker.addEventListener('change', () => readLocalFile(picker.files && picker.files[0], side));
+    editor.addEventListener('dragover', event => {
+      if (!event.dataTransfer || !Array.from(event.dataTransfer.types || []).includes('Files')) return;
+      event.preventDefault(); editor.classList.add('is-dragover');
+    });
+    editor.addEventListener('dragleave', event => { if (!editor.contains(event.relatedTarget)) editor.classList.remove('is-dragover'); });
+    editor.addEventListener('drop', event => {
+      editor.classList.remove('is-dragover');
+      const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+      if (!file) return;
+      event.preventDefault(); readLocalFile(file, side);
+    });
+  }
+
+  leftInput.addEventListener('input', () => {
+    if (!importing && sourceInfo.left) { sourceInfo.left = null; updateSourceLabel('left'); }
+    invalidate();
+  });
+  rightInput.addEventListener('input', () => {
+    if (!importing && sourceInfo.right) { sourceInfo.right = null; updateSourceLabel('right'); }
+    invalidate();
+  });
+  $('compareBtn').addEventListener('click', () => runCompare());
+  $('pasteLeft').addEventListener('click', () => pasteInto(leftInput, 'left'));
+  $('pasteRight').addEventListener('click', () => pasteInto(rightInput, 'right'));
+  setupFileImport('left'); setupFileImport('right');
+  $('sampleBtn').addEventListener('click', () => {
+    if ((leftInput.value || rightInput.value) && !confirm('载入示例会替换当前两侧文本，是否继续？')) return;
+    sourceInfo.left = null; sourceInfo.right = null; updateSourceLabel('left'); updateSourceLabel('right');
+    leftInput.value = '项目：轻量文本对比工具\n版本：1.0\n\n让每一处改动，都清晰可见。\n支持中文和 English 文本。\n数据需要上传到服务器。\n这是一行将被删除的旧说明。\n\n功能清单\n- 按行比较\n- 查看差异\n\n感谢你的使用。';
+    rightInput.value = '项目：轻量文本对比工具\n版本：2.0\n\n让每一处改动，都一目了然。\n支持中文、English 和表情 ✨。\n数据只在浏览器本地处理。\n\n功能清单\n- 按行比较\n- 查看差异\n- 字符级高亮\n- 一键导出结果\n\n感谢你的使用。';
+    invalidate(); scheduleCounts(true); runCompare(false);
+  });
+  $('swapBtn').addEventListener('click', () => {
+    const hadResults = Boolean(state);
+    [leftInput.value, rightInput.value] = [rightInput.value, leftInput.value];
+    [sourceInfo.left, sourceInfo.right] = [sourceInfo.right, sourceInfo.left];
+    updateSourceLabel('left'); updateSourceLabel('right');
+    invalidate(); scheduleCounts(true); if (hadResults) runCompare(false); else toast('已交换两侧文本。');
+  });
+  $('clearBtn').addEventListener('click', () => {
+    if (!confirm('确定清空两侧文本？此操作无法撤销。')) return;
+    sourceInfo.left = null; sourceInfo.right = null; updateSourceLabel('left'); updateSourceLabel('right');
+    leftInput.value = ''; rightInput.value = ''; invalidate(); scheduleCounts(true);
+    clearTimeout(toastTimer); $('toast').hidden = true;
+    $('emptyTitle').textContent = '差异将显示在这里';
+    $('emptyDescription').textContent = '分别粘贴文本、拖入文件，或者点击“导入文件”。'; leftInput.focus();
+  });
+  document.querySelectorAll('input[name="mode"], #ignoreSpace, #ignoreCase').forEach(input => input.addEventListener('change', () => {
+    const hadResults = Boolean(state); invalidate('对比设置已更新，点击「开始对比」重新计算。');
+    if (hadResults) runCompare(false);
+  }));
+  $('onlyDiff').addEventListener('change', () => { page = 0; rebuildVisible(); $('diffScroll').scrollTop = 0; if (state.groups.length) jumpToGroup(Math.max(0, activeGroup)); });
+  $('showWhitespace').addEventListener('change', () => {
+    const top = $('diffScroll').scrollTop; renderRows(); $('diffScroll').scrollTop = top;
+  });
+  $('prevDiff').addEventListener('click', () => jumpToGroup(activeGroup - 1));
+  $('nextDiff').addEventListener('click', () => jumpToGroup(activeGroup + 1));
+  $('prevPage').addEventListener('click', () => changePage(-1));
+  $('nextPage').addEventListener('click', () => changePage(1));
+  $('copyResultBtn').addEventListener('click', async () => {
+    if (!state) return;
+    const estimated = state.payload.left.length + state.payload.right.length + state.diffRows * 80;
+    if (estimated > 6000000) { toast('报告内容较大，为避免占用过多内存，请使用「导出 TXT」。', false, 5000); return; }
+    try {
+      const ok = await copyText(reportParts().join(''));
+      toast(ok ? '已复制完整报告，包含差异明细与两侧原文。' : '复制失败，请使用「导出 TXT」保存结果。', !ok);
+    } catch (error) { toast('复制失败，请使用「导出 TXT」保存结果。', true); }
+  });
+  $('exportBtn').addEventListener('click', () => {
+    if (!state) return;
+    try {
+      const blob = new Blob(['\uFEFF', ...reportParts()], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob), anchor = document.createElement('a');
+      const now = new Date(), date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      anchor.href = url; anchor.download = `文本对比结果-${date}.txt`; document.body.append(anchor); anchor.click(); anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+      toast('已导出完整报告，不受分页或「仅看差异」筛选影响。');
+    } catch (error) { toast('导出失败，请尝试关闭其他页面后重试。', true); }
+  });
+  document.addEventListener('keydown', event => {
+    if (event.isComposing) return;
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); runCompare(); }
+    if (state && event.altKey && !event.ctrlKey && !event.metaKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+      event.preventDefault(); jumpToGroup(activeGroup + (event.key === 'ArrowUp' ? -1 : 1));
+    }
+    if (busy && event.key === 'Escape') { event.preventDefault(); cancelPending(true); }
+  });
+  window.addEventListener('pagehide', disposeWorker);
+  updateSourceLabel('left'); updateSourceLabel('right'); updateCounts();
+})();
+
+</script>
+</body>
+</html>
