@@ -1,0 +1,227 @@
+unction splitLines(text) {
+    if (text === '') return { lines: [], starts: new Uint32Array(0) };
+    const lines = [], starts = [];
+    let start = 0;
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      if (code !== 10 && code !== 13) continue;
+      starts.push(start);
+      lines.push(text.slice(start, i));
+      if (code === 13 && text.charCodeAt(i + 1) === 10) i++;
+      start = i + 1;
+    }
+    starts.push(start);
+    lines.push(text.slice(start));
+    return { lines, starts: Uint32Array.from(starts) };
+  }
+
+  function appendSegment(output, type, aStart, bStart, length) {
+    if (length <= 0) return;
+    const last = output[output.length - 1];
+    const contiguous = last && last.type === type && (
+      type === 'equal'
+        ? last.aStart + last.length === aStart && last.bStart + last.length === bStart
+        : type === 'remove'
+          ? last.aStart + last.length === aStart && last.bStart === bStart
+          : last.bStart + last.length === bStart && last.aStart === aStart
+    );
+    if (contiguous) last.length += length;
+    else output.push({ type, aStart, bStart, length });
+  }
+
+  function appendCoarse(output, aStart, aEnd, bStart, bEnd, budget) {
+    budget.coarse = true;
+    appendSegment(output, 'remove', aStart, bStart, aEnd - aStart);
+    appendSegment(output, 'add', aEnd, bStart, bEnd - bStart);
+  }
+
+  function backtrackSegments(trace, n, m, offset, aOffset, bOffset) {
+    const reversed = [];
+    let x = n, y = m;
+    for (let d = trace.length - 1; d >= 0; d--) {
+      const v = trace[d], k = x - y;
+      const previousK = k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1]) ? k + 1 : k - 1;
+      const previousX = v[offset + previousK];
+      const previousY = previousX - previousK;
+      const snake = Math.min(x - previousX, y - previousY);
+      if (snake > 0) {
+        reversed.push({ type: 'equal', aStart: aOffset + x - snake, bStart: bOffset + y - snake, length: snake });
+        x -= snake; y -= snake;
+      }
+      if (d === 0) break;
+      if (x === previousX) {
+        y--;
+        reversed.push({ type: 'add', aStart: aOffset + x, bStart: bOffset + y, length: 1 });
+      } else {
+        x--;
+        reversed.push({ type: 'remove', aStart: aOffset + x, bStart: bOffset + y, length: 1 });
+      }
+    }
+    const output = [];
+    for (let i = reversed.length - 1; i >= 0; i--) {
+      const segment = reversed[i];
+      appendSegment(output, segment.type, segment.aStart, segment.bStart, segment.length);
+    }
+    return output;
+  }
+
+  function myersRange(a, b, aStart, aEnd, bStart, bEnd, budget, maxDistance) {
+    const n = aEnd - aStart, m = bEnd - bStart;
+    if (!n) return [{ type: 'add', aStart, bStart, length: m }];
+    if (!m) return [{ type: 'remove', aStart, bStart, length: n }];
+    const limit = Math.min(n + m, maxDistance);
+    if (Math.abs(n - m) > limit || budget.remaining <= 0) return null;
+    const offset = limit + 1;
+    const v = new Int32Array(2 * limit + 3);
+    v.fill(-1);
+    v[offset + 1] = 0;
+    const trace = [];
+    for (let d = 0; d <= limit; d++) {
+      trace.push(v.slice());
+      for (let k = -d; k <= d; k += 2) {
+        if (--budget.remaining < 0) return null;
+        const index = offset + k;
+        let x = k === -d || (k !== d && v[index - 1] < v[index + 1]) ? v[index + 1] : v[index - 1] + 1;
+        let y = x - k;
+        while (x < n && y < m && a[aStart + x] === b[bStart + y]) {
+          x++; y++;
+          if (--budget.remaining < 0) return null;
+        }
+        v[index] = x;
+        if (x >= n && y >= m) return backtrackSegments(trace, n, m, offset, aStart, bStart);
+      }
+    }
+    return null;
+  }
+
+  function patienceAnchors(a, b, aStart, aEnd, bStart, bEnd) {
+    const total = (aEnd - aStart) + (bEnd - bStart);
+    if (total < ANCHOR_THRESHOLD || total > ANCHOR_SCAN_LIMIT) return [];
+
+    const aUnique = new Map();
+    for (let i = aStart; i < aEnd; i++) {
+      const key = a[i];
+      if (!aUnique.has(key)) aUnique.set(key, i);
+      else aUnique.set(key, -1);
+    }
+    const bUnique = new Map();
+    for (let i = bStart; i < bEnd; i++) {
+      const key = b[i];
+      if (!bUnique.has(key)) bUnique.set(key, i);
+      else bUnique.set(key, -1);
+    }
+
+    const pairs = [];
+    for (const [key, ai] of aUnique) {
+      const bi = bUnique.get(key);
+      if (ai >= 0 && bi >= 0) pairs.push({ a: ai, b: bi });
+    }
+    if (!pairs.length) return [];
+    pairs.sort((x, y) => x.a - y.a);
+
+    const tails = [], tailPairIndexes = [];
+    const previous = new Int32Array(pairs.length);
+    previous.fill(-1);
+    for (let i = 0; i < pairs.length; i++) {
+      const value = pairs[i].b;
+      let low = 0, high = tails.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (tails[middle] < value) low = middle + 1;
+        else high = middle;
+      }
+      tails[low] = value;
+      if (low > 0) previous[i] = tailPairIndexes[low - 1];
+      tailPairIndexes[low] = i;
+    }
+
+    const anchors = new Array(tails.length);
+    let cursor = tailPairIndexes[tails.length - 1];
+    for (let i = anchors.length - 1; i >= 0; i--) {
+      anchors[i] = pairs[cursor];
+      cursor = previous[cursor];
+    }
+    return anchors;
+  }
+
+  function diffRange(a, b, aStart, aEnd, bStart, bEnd, budget, maxDistance, output, depth = 0) {
+    let prefix = 0;
+    while (aStart + prefix < aEnd && bStart + prefix < bEnd && a[aStart + prefix] === b[bStart + prefix]) prefix++;
+    appendSegment(output, 'equal', aStart, bStart, prefix);
+    aStart += prefix; bStart += prefix;
+
+    let suffix = 0;
+    while (aEnd - suffix > aStart && bEnd - suffix > bStart && a[aEnd - suffix - 1] === b[bEnd - suffix - 1]) suffix++;
+    aEnd -= suffix; bEnd -= suffix;
+
+    const n = aEnd - aStart, m = bEnd - bStart;
+    if (!n) appendSegment(output, 'add', aStart, bStart, m);
+    else if (!m) appendSegment(output, 'remove', aStart, bStart, n);
+    else {
+      let anchored = false;
+      if (depth < 14) {
+        const anchors = patienceAnchors(a, b, aStart, aEnd, bStart, bEnd);
+        if (anchors.length) {
+          anchored = true;
+          let previousA = aStart, previousB = bStart;
+          for (const anchor of anchors) {
+            diffRange(a, b, previousA, anchor.a, previousB, anchor.b, budget, maxDistance, output, depth + 1);
+            appendSegment(output, 'equal', anchor.a, anchor.b, 1);
+            previousA = anchor.a + 1; previousB = anchor.b + 1;
+          }
+          diffRange(a, b, previousA, aEnd, previousB, bEnd, budget, maxDistance, output, depth + 1);
+        }
+      }
+      if (!anchored) {
+        const middle = myersRange(a, b, aStart, aEnd, bStart, bEnd, budget, maxDistance);
+        if (middle) {
+          for (const segment of middle) appendSegment(output, segment.type, segment.aStart, segment.bStart, segment.length);
+        } else appendCoarse(output, aStart, aEnd, bStart, bEnd, budget);
+      }
+    }
+    appendSegment(output, 'equal', aEnd, bEnd, suffix);
+  }
+
+  function appendBlock(blocks, kind, aStart, bStart, length) {
+    if (length <= 0) return;
+    const last = blocks[blocks.length - 1];
+    const contiguous = last && last.kind === kind && (
+      kind === 'equal' || kind === 'modify'
+        ? last.aStart + last.length === aStart && last.bStart + last.length === bStart
+        : kind === 'remove'
+          ? last.aStart + last.length === aStart && last.bStart === bStart
+          : last.bStart + last.length === bStart && last.aStart === aStart
+    );
+    if (contiguous) last.length += length;
+    else blocks.push({ kind, aStart, bStart, length });
+  }
+
+  function makeBlocks(segments, aKeys, bKeys) {
+    const blocks = [];
+    let aCursor = 0, bCursor = 0;
+    for (let i = 0; i < segments.length;) {
+      const segment = segments[i];
+      if (segment.type === 'equal') {
+        appendBlock(blocks, 'equal', aCursor, bCursor, segment.length);
+        aCursor += segment.length; bCursor += segment.length; i++;
+        continue;
+      }
+
+      const changeAStart = aCursor, changeBStart = bCursor;
+      while (i < segments.length && segments[i].type !== 'equal') {
+        const current = segments[i++];
+        if (current.type === 'remove') aCursor += current.length;
+        else bCursor += current.length;
+      }
+      const aLength = aCursor - changeAStart, bLength = bCursor - changeBStart;
+      const paired = Math.min(aLength, bLength);
+      let runStart = 0, runKind = null;
+      for (let k = 0; k < paired; k++) {
+        const kind = aKeys[changeAStart + k] === bKeys[changeBStart + k] ? 'equal' : 'modify';
+        if (kind !== runKind) {
+          if (runKind) appendBlock(blocks, runKind, changeAStart + runStart, changeBStart + runStart, k - runStart);
+          runKind = kind; runStart = k;
+        }
+      }
+      if (runKind) appendBlock(blocks, runKind, changeAStart + runStart, changeBStart + runStart, paired - runStart);
+      if (aLength > paired) appendBlock(blocks, 'remove', changeAStart + paired, 
