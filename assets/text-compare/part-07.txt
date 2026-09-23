@@ -1,0 +1,169 @@
+  worker = new Worker(workerUrl);
+      worker.onmessage = event => {
+        if (id !== taskId) return;
+        const message = event.data || {};
+        if (message.type === 'progress') { setProgress(message.stage, message.progress); return; }
+        if (message.ok) finish(message.result); else fail(new Error(message.error));
+      };
+      worker.onerror = event => {
+        event.preventDefault();
+        if (id === taskId) fallback();
+      };
+      worker.postMessage(payload);
+    } catch (error) { fallback(); }
+  }
+
+  function visibleText(text) {
+    if (!$('showWhitespace').checked) return text;
+    return text.replace(/ /g, '·').replace(/\t/g, '⇥   ').replace(/\u3000/g, '□').replace(/\u00a0/g, '⍽');
+  }
+  function appendTextRanges(container, text, ranges) {
+    if (!ranges || !ranges.length) {
+      container.textContent = visibleText(text);
+      return;
+    }
+    let cursor = 0;
+    for (let i = 0; i < ranges.length; i += 2) {
+      const start = Math.max(cursor, ranges[i]), end = Math.max(start, ranges[i + 1]);
+      if (start > cursor) {
+        const normal = document.createElement('span'); normal.textContent = visibleText(text.slice(cursor, start)); container.append(normal);
+      }
+      const changed = document.createElement('span'); changed.className = 'changed-text'; changed.textContent = visibleText(text.slice(start, end)); container.append(changed);
+      cursor = end;
+    }
+    if (cursor < text.length) {
+      const normal = document.createElement('span'); normal.textContent = visibleText(text.slice(cursor)); container.append(normal);
+    }
+  }
+  function makeCell(line, row, side) {
+    const cell = document.createElement('div'); cell.className = 'diff-cell';
+    if (!line) cell.classList.add('cell-missing');
+    else if (row.kind !== 'equal') cell.classList.add(side === 'left' ? 'cell-remove' : 'cell-add');
+    const gutter = document.createElement('span'); gutter.className = 'line-no'; gutter.setAttribute('aria-hidden', 'true');
+    gutter.textContent = line ? String(line.number) : '';
+    const content = document.createElement('div'); content.className = 'line-content';
+    if (!line) {
+      content.textContent = '—'; content.setAttribute('aria-label', '此侧无对应行');
+    } else if (!line.text) {
+      const empty = document.createElement('span'); empty.className = 'empty-line'; empty.textContent = '空行'; content.append(empty);
+    } else appendTextRanges(content, line.text, line.ranges);
+    cell.append(gutter, content); return cell;
+  }
+  function rebuildVisible() {
+    if (!state) return;
+    visibleTotal = $('onlyDiff').checked ? state.diffRows : state.totalRows;
+    const totalPages = Math.max(1, Math.ceil(visibleTotal / PAGE_SIZE));
+    page = Math.max(0, Math.min(page, totalPages - 1));
+    renderRows();
+  }
+  function renderRows() {
+    if (!state) return;
+    const fragment = document.createDocumentFragment();
+    const start = page * PAGE_SIZE, end = Math.min(start + PAGE_SIZE, visibleTotal);
+    for (let position = start; position < end; position++) {
+      const rowIndex = visiblePositionToRow(position), row = rowData(rowIndex);
+      if (!row) continue;
+      const element = document.createElement('div'); element.className = 'diff-row';
+      if (row.group >= 0 && row.group === activeGroup) element.classList.add('is-current');
+      element.dataset.index = String(rowIndex); element.dataset.group = String(row.group);
+      element.append(makeCell(row.left, row, 'left'), makeCell(row.right, row, 'right')); fragment.append(element);
+    }
+    if (!visibleTotal) {
+      const empty = document.createElement('div'); empty.className = 'filtered-empty';
+      empty.textContent = '没有需要显示的差异。关闭「仅看差异」可查看完整文本。'; fragment.append(empty);
+    }
+    $('diffRows').replaceChildren(fragment);
+    $('results').style.setProperty('--scrollbar-width', ($('diffScroll').offsetWidth - $('diffScroll').clientWidth) + 'px');
+    const totalPages = Math.max(1, Math.ceil(visibleTotal / PAGE_SIZE));
+    $('pageLabel').textContent = `第 ${page + 1} / ${totalPages} 页 · ${number(visibleTotal)} 行`;
+    $('prevPage').disabled = page <= 0; $('nextPage').disabled = page >= totalPages - 1;
+    $('navCount').textContent = `${activeGroup < 0 ? 0 : activeGroup + 1} / ${state.groups.length} 处差异`;
+    $('prevDiff').disabled = activeGroup <= 0; $('nextDiff').disabled = activeGroup < 0 || activeGroup >= state.groups.length - 1;
+  }
+  function jumpToGroup(target) {
+    if (!state || target < 0 || target >= state.groups.length) return;
+    activeGroup = target;
+    const group = state.groups[target];
+    const position = $('onlyDiff').checked ? group.diffStart : group.startRow;
+    page = Math.floor(position / PAGE_SIZE); renderRows();
+    const row = $('diffRows').querySelector(`[data-index="${group.startRow}"]`);
+    if (row) {
+      const scroller = $('diffScroll');
+      const top = row.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      scroller.scrollTo({ top: Math.max(0, top - 30), behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    }
+    $('liveStatus').textContent = `第 ${target + 1} 处差异，共 ${state.groups.length} 处。`;
+  }
+  function changePage(delta) {
+    if (!state) return;
+    const target = page + delta, totalPages = Math.max(1, Math.ceil(visibleTotal / PAGE_SIZE));
+    if (target < 0 || target >= totalPages) return;
+    page = target; renderRows(); $('diffScroll').scrollTop = 0;
+  }
+
+  function reportParts() {
+    if (!state) return [];
+    const s = state.stats, chunks = [];
+    let buffer = '';
+    const flush = () => { if (buffer) { chunks.push(buffer); buffer = ''; } };
+    const push = value => {
+      buffer += `${value}\n`;
+      if (buffer.length >= 65536) flush();
+    };
+    push('文本对比报告'); push('============'); push(optionDescription(state.payload.options));
+    push(`差异 ${state.groups.length} 处；新增 ${s.added} 行；删除 ${s.removed} 行；修改 ${s.modified} 行；相同 ${s.equal} 行。`);
+    push('统计以对齐后的行计；连续变化行算作一处差异。');
+    if (state.coarse) push('注意：已启用大文本保护，个别片段使用块级对齐或省略字符级细分。');
+    push(''); push('【差异明细】（- 为原文，+ 为新文；括号内为行号）');
+    if (!state.groups.length) push(state.rawEqual ? '两段文本完全一致。' : '按当前设置未发现差异。');
+    for (let groupIndex = 0; groupIndex < state.groups.length; groupIndex++) {
+      const group = state.groups[groupIndex];
+      push(''); push(`@@ 第 ${groupIndex + 1} 处差异 @@`);
+      for (let rowIndex = group.startRow; rowIndex <= group.endRow; rowIndex++) {
+        const row = rowData(rowIndex);
+        if (row.left) push(`- (${row.left.number}) ${row.left.text}`);
+        if (row.right) push(`+ (${row.right.number}) ${row.right.text}`);
+      }
+    }
+    push(''); push('【完整原始文本 A】'); flush();
+    chunks.push(state.payload.left);
+    chunks.push('\n\n【完整修改后文本 B】\n');
+    chunks.push(state.payload.right);
+    chunks.push('\n');
+    return chunks;
+  }
+  async function copyText(text) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      try { await navigator.clipboard.writeText(text); return true; } catch (error) { /* use fallback */ }
+    }
+    const focused = document.activeElement;
+    const helper = document.createElement('textarea'); helper.value = text;
+    helper.setAttribute('readonly', ''); helper.style.cssText = 'position:fixed;left:-10000px;top:0;';
+    document.body.append(helper); helper.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (error) { ok = false; }
+    helper.remove(); if (focused && typeof focused.focus === 'function') focused.focus({ preventScroll: true });
+    return ok;
+  }
+  async function pasteInto(input, side) {
+    try {
+      if (!navigator.clipboard || typeof navigator.clipboard.readText !== 'function') throw new Error('Clipboard unavailable');
+      const text = await navigator.clipboard.readText();
+      sourceInfo[side] = null; updateSourceLabel(side);
+      input.value = text; invalidate(); input.focus();
+    } catch (error) {
+      input.focus(); toast(`浏览器不允许直接读取剪贴板，请在输入框内按 ${isMac ? '⌘' : 'Ctrl'} + V 粘贴。`);
+    }
+  }
+
+  function decodeTextBuffer(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let encoding = 'UTF-8', offset = 0;
+    if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) { offset = 3; encoding = 'UTF-8 BOM'; return { text: new TextDecoder('utf-8').decode(bytes.subarray(offset)), encoding }; }
+    if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) { offset = 2; encoding = 'UTF-16 LE'; return { text: new TextDecoder('utf-16le').decode(bytes.subarray(offset)), encoding }; }
+    if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) { offset = 2; encoding = 'UTF-16 BE'; return { text: new TextDecoder('utf-16be').decode(bytes.subarray(offset)), encoding }; }
+
+    const sampleLength = Math.min(bytes.length, 4096);
+    let nulls = 0;
+    for (let i = 0; i < sampleLength; i++) if (bytes[i] === 0) nulls++;
+    if (sampleLength && nulls / sampleLength > 0.08) throw new 
