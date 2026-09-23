@@ -1,0 +1,75 @@
+   const right = rightIndex == null ? null : {
+      text: lineText(state.payload.right, state.rightStarts, rightIndex),
+      number: rightIndex + 1,
+      ranges: rangePair ? rangePair[1] : null
+    };
+    return { kind: block.kind, group: block.group, left, right };
+  }
+
+  function runCompare(scroll = true) {
+    if (busy) { cancelPending(true); return; }
+    cancelPending(false);
+    clearTimeout(toastTimer); $('toast').hidden = true;
+    const payload = { left: leftInput.value, right: rightInput.value, options: options() };
+    if (!payload.left && !payload.right) {
+      toast('请先在任意一侧粘贴文本或导入文件；另一侧可以留空。'); leftInput.focus(); return;
+    }
+    const id = taskId;
+    setBusy(true);
+    setProgress('正在准备', 0.01);
+    const totalLength = payload.left.length + payload.right.length;
+    if (totalLength > 8000000 && payload.options.mode !== 'line') {
+      toast('已启用大文本自适应：仍会逐行完整对比，字符级细分会按资源情况自动降级。', false, 5200);
+    }
+
+    const finish = result => {
+      if (id !== taskId) return;
+      disposeWorker(); setBusy(false);
+      result.leftStarts = result.leftStarts instanceof Uint32Array ? result.leftStarts : new Uint32Array(result.leftStarts || []);
+      result.rightStarts = result.rightStarts instanceof Uint32Array ? result.rightStarts : new Uint32Array(result.rightStarts || []);
+      result.diffBlockIndexes = [];
+      for (let i = 0; i < result.blocks.length; i++) if (result.blocks[i].kind !== 'equal') result.diffBlockIndexes.push(i);
+      state = { ...result, payload };
+      page = 0; activeGroup = result.groups.length ? 0 : -1;
+      $('emptyState').hidden = true; $('results').hidden = false;
+      $('addCount').textContent = number(result.stats.added);
+      $('removeCount').textContent = number(result.stats.removed);
+      $('changeCount').textContent = number(result.stats.modified);
+      $('equalCount').textContent = number(result.stats.equal);
+      const scale = result.largeMode ? ` · ${number(Math.max(result.leftStarts.length, result.rightStarts.length))} 行规模` : '';
+      $('resultSubtitle').textContent = result.groups.length ? `共找到 ${number(result.groups.length)} 处差异${scale}` : `未发现差异${scale}`;
+      $('coarseNotice').hidden = !result.coarse;
+      if (result.coarse) {
+        const reasons = [];
+        if (result.lineCoarse) reasons.push('个别高复杂度片段采用块级对齐');
+        if (result.charCoarse) reasons.push('部分修改行未继续细分到字符');
+        $('coarseNotice').textContent = `已启用大文本保护：${reasons.join('；')}。所有原文均完整保留，逐行结果仍可浏览和导出。`;
+      }
+      $('sameNotice').hidden = result.groups.length !== 0;
+      $('sameNotice').textContent = result.rawEqual ? '✓ 两段文本完全一致。' : result.lineEndingOnly ? '✓ 文本内容一致，仅换行格式不同（已统一 CRLF / CR / LF）。' : '✓ 按当前忽略设置，两段文本一致。原始内容仍完整保留。';
+      $('modeHint').textContent = payload.options.mode === 'line' ? '整行标记差异' : '深色标出已细分的行内差异';
+      rebuildVisible();
+      if (result.groups.length) jumpToGroup(0);
+      $('liveStatus').textContent = `对比完成，${result.groups.length} 处差异。新增 ${result.stats.added} 行，删除 ${result.stats.removed} 行，修改 ${result.stats.modified} 行，相同 ${result.stats.equal} 行。`;
+      if (scroll) $('results').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest' });
+    };
+    const fail = error => {
+      if (id !== taskId) return;
+      disposeWorker(); setBusy(false);
+      console.error('Diff failed:', error);
+      toast('对比未完成。可能是浏览器可用内存不足；文本仍然完整保留，可切换「整行对比」后重试。', true);
+      $('liveStatus').textContent = '对比未完成。';
+    };
+    const fallback = () => {
+      disposeWorker();
+      setTimeout(() => {
+        if (id !== taskId) return;
+        try { finish(engine.compare(payload, update => setProgress(update.stage, update.progress))); }
+        catch (error) { fail(error); }
+      }, 30);
+    };
+
+    try {
+      const source = `const engine = (${createDiffEngine.toString()})();\nself.onmessage = event => {\n  try {\n    const result = engine.compare(event.data, update => self.postMessage({type:'progress', ...update}));\n    const transfer = [];\n    if (result.leftStarts && result.leftStarts.buffer) transfer.push(result.leftStarts.buffer);\n    if (result.rightStarts && result.rightStarts.buffer) transfer.push(result.rightStarts.buffer);\n    self.postMessage({type:'result', ok:true, result}, transfer);\n  } catch (error) {\n    self.postMessage({type:'result', ok:false, error:String(error && (error.message || error))});\n  }\n};`;
+      workerUrl = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+    
