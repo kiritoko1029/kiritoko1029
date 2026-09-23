@@ -1,0 +1,55 @@
+) values.push('忽略大小写');
+    values.push('统一换行格式');
+    return values.join(' · ');
+  }
+
+  function lineText(text, starts, index) {
+    if (index == null || index < 0 || index >= starts.length) return null;
+    const start = starts[index];
+    let end = index + 1 < starts.length ? starts[index + 1] : text.length;
+    if (end > start && text.charCodeAt(end - 1) === 10) end--;
+    if (end > start && text.charCodeAt(end - 1) === 13) end--;
+    return text.slice(start, end);
+  }
+  function findBlockByRow(rowIndex) {
+    let low = 0, high = state.blocks.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >>> 1, block = state.blocks[middle];
+      if (rowIndex < block.rowStart) high = middle - 1;
+      else if (rowIndex >= block.rowStart + block.length) low = middle + 1;
+      else return block;
+    }
+    return null;
+  }
+  function findDiffBlock(position) {
+    const indexes = state.diffBlockIndexes;
+    let low = 0, high = indexes.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >>> 1, block = state.blocks[indexes[middle]];
+      if (position < block.diffStart) high = middle - 1;
+      else if (position >= block.diffStart + block.length) low = middle + 1;
+      else return block;
+    }
+    return null;
+  }
+  function visiblePositionToRow(position) {
+    if (!$('onlyDiff').checked) return position;
+    const block = findDiffBlock(position);
+    return block ? block.rowStart + position - block.diffStart : -1;
+  }
+  function rowData(rowIndex) {
+    const block = findBlockByRow(rowIndex);
+    if (!block) return null;
+    const offset = rowIndex - block.rowStart;
+    let leftIndex = null, rightIndex = null;
+    if (block.kind === 'equal' || block.kind === 'modify') {
+      leftIndex = block.aStart + offset; rightIndex = block.bStart + offset;
+    } else if (block.kind === 'remove') leftIndex = block.aStart + offset;
+    else rightIndex = block.bStart + offset;
+    const rangePair = block.kind === 'modify' && block.ranges && offset < block.ranges.length ? block.ranges[offset] : null;
+    const left = leftIndex == null ? null : {
+      text: lineText(state.payload.left, state.leftStarts, leftIndex),
+      number: leftIndex + 1,
+      ranges: rangePair ? rangePair[0] : null
+    };
+  
