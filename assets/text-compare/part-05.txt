@@ -1,0 +1,211 @@
+ changeBStart + paired, aLength - paired);
+      if (bLength > paired) appendBlock(blocks, 'add', changeAStart + paired, changeBStart + paired, bLength - paired);
+    }
+    return blocks;
+  }
+
+  function tokenize(text, options) {
+    const tokens = [];
+    if (segmenter) {
+      for (const item of segmenter.segment(text)) {
+        const key = normalize(item.segment, options);
+        if (key) tokens.push({ key, start: item.index, end: item.index + item.segment.length });
+      }
+    } else {
+      let index = 0;
+      for (const character of text) {
+        const key = normalize(character, options);
+        if (key) tokens.push({ key, start: index, end: index + character.length });
+        index += character.length;
+      }
+    }
+    return tokens;
+  }
+
+  function changedRanges(tokens, segments, type) {
+    const ranges = [];
+    for (const segment of segments) {
+      if (segment.type !== type || !segment.length) continue;
+      const startIndex = type === 'remove' ? segment.aStart : segment.bStart;
+      const first = tokens[startIndex], lastToken = tokens[startIndex + segment.length - 1];
+      if (!first || !lastToken) continue;
+      const previousEnd = ranges.length ? ranges[ranges.length - 1] : -1;
+      if (previousEnd === first.start) ranges[ranges.length - 1] = lastToken.end;
+      else ranges.push(first.start, lastToken.end);
+    }
+    return ranges;
+  }
+
+  function refineRanges(left, right, options, budget) {
+    const leftTokens = tokenize(left, options), rightTokens = tokenize(right, options);
+    const aKeys = leftTokens.map(token => token.key), bKeys = rightTokens.map(token => token.key);
+    const segments = [];
+    const beforeCoarse = budget.coarse;
+    diffRange(aKeys, bKeys, 0, aKeys.length, 0, bKeys.length, budget, 512, segments);
+    const coarse = !beforeCoarse && budget.coarse;
+    return {
+      left: changedRanges(leftTokens, segments, 'remove'),
+      right: changedRanges(rightTokens, segments, 'add'),
+      coarse
+    };
+  }
+
+  function decorateBlocks(blocks, linesA, linesB, options, totalCharacters, progressCallback) {
+    const stats = { added: 0, removed: 0, modified: 0, equal: 0 };
+    const groups = [];
+    let rowStart = 0, diffStart = 0, activeGroup = -1;
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      block.rowStart = rowStart;
+      block.group = -1;
+      if (block.kind === 'equal') {
+        stats.equal += block.length;
+        activeGroup = -1;
+      } else {
+        block.diffStart = diffStart;
+        if (activeGroup < 0) {
+          activeGroup = groups.length;
+          groups.push({ startRow: rowStart, endRow: rowStart + block.length - 1, diffStart, startBlock: i, endBlock: i });
+        } else {
+          groups[activeGroup].endRow = rowStart + block.length - 1;
+          groups[activeGroup].endBlock = i;
+        }
+        block.group = activeGroup;
+        if (block.kind === 'add') stats.added += block.length;
+        else if (block.kind === 'remove') stats.removed += block.length;
+        else stats.modified += block.length;
+        diffStart += block.length;
+      }
+      rowStart += block.length;
+    }
+
+    let charCoarse = false;
+    if (options.mode !== 'line' && stats.modified) {
+      const pairLimit = totalCharacters > 12000000 ? 800 : totalCharacters > 4000000 ? 2000 : totalCharacters > 1000000 ? 6000 : 30000;
+      const charBudget = { remaining: totalCharacters > 4000000 ? 1200000 : 3500000, coarse: false };
+      let refinedPairs = 0;
+      outer: for (let blockIndex = 0; blockIndex < blocks.length; blockIndex++) {
+        const block = blocks[blockIndex];
+        if (block.kind !== 'modify') continue;
+        block.ranges = [];
+        for (let offset = 0; offset < block.length; offset++) {
+          if (refinedPairs >= pairLimit || charBudget.remaining <= 0) { charCoarse = true; break outer; }
+          const left = linesA[block.aStart + offset], right = linesB[block.bStart + offset];
+          if (left.length + right.length > 30000) {
+            block.ranges.push(null); charCoarse = true; refinedPairs++; continue;
+          }
+          const result = refineRanges(left, right, options, charBudget);
+          block.ranges.push([result.left, result.right]);
+          if (result.coarse) charCoarse = true;
+          refinedPairs++;
+          if (refinedPairs % 500 === 0) emit(progressCallback, '正在细化字符差异', Math.min(0.95, 0.78 + refinedPairs / Math.max(1, Math.min(stats.modified, pairLimit)) * 0.17));
+        }
+      }
+      if (refinedPairs < stats.modified) charCoarse = true;
+    }
+
+    return { stats, groups, totalRows: rowStart, diffRows: diffStart, charCoarse };
+  }
+
+  function compare(payload, progressCallback) {
+    if (!payload || typeof payload.left !== 'string' || typeof payload.right !== 'string') throw new TypeError('请输入有效文本。');
+    const options = payload.options || {};
+    const totalCharacters = payload.left.length + payload.right.length;
+    emit(progressCallback, '正在解析文本', 0.06);
+    const leftData = splitLines(payload.left), rightData = splitLines(payload.right);
+    const linesA = leftData.lines, linesB = rightData.lines;
+
+    emit(progressCallback, '正在建立行索引', 0.16);
+    const aKeys = linesA.map(line => normalize(line, options));
+    const bKeys = linesB.map(line => normalize(line, options));
+    const totalLines = linesA.length + linesB.length;
+    const maxDistance = totalLines > 500000 ? 650 : totalLines > 100000 ? 900 : 1400;
+    const budget = { remaining: Math.min(24000000, Math.max(5000000, totalLines * 18)), coarse: false };
+
+    emit(progressCallback, '正在对齐文本行', 0.30);
+    const segments = [];
+    diffRange(aKeys, bKeys, 0, aKeys.length, 0, bKeys.length, budget, maxDistance, segments);
+
+    emit(progressCallback, '正在整理差异块', 0.68);
+    const blocks = makeBlocks(segments, aKeys, bKeys);
+    emit(progressCallback, options.mode === 'line' ? '正在生成结果' : '正在细化字符差异', 0.78);
+    const decorated = decorateBlocks(blocks, linesA, linesB, options, totalCharacters, progressCallback);
+
+    const rawEqual = payload.left === payload.right;
+    const lineEndingOnly = !rawEqual && !options.ignoreSpace && !options.ignoreCase && decorated.groups.length === 0;
+    const largeMode = totalCharacters > 1000000 || Math.max(linesA.length, linesB.length) > 30000;
+    emit(progressCallback, '正在完成', 0.98);
+    return {
+      blocks,
+      groups: decorated.groups,
+      stats: decorated.stats,
+      totalRows: decorated.totalRows,
+      diffRows: decorated.diffRows,
+      leftStarts: leftData.starts,
+      rightStarts: rightData.starts,
+      rawEqual,
+      lineEndingOnly,
+      lineCoarse: budget.coarse,
+      charCoarse: decorated.charCoarse,
+      coarse: budget.coarse || decorated.charCoarse,
+      largeMode
+    };
+  }
+
+  return { compare, splitLines, diffRange, myersRange };
+}
+
+(() => {
+  const $ = id => document.getElementById(id);
+  const leftInput = $('leftText'), rightInput = $('rightText');
+  const PAGE_SIZE = 200;
+  const engine = createDiffEngine();
+  let worker = null, workerUrl = null, taskId = 0, state = null, toastTimer, countTimer;
+  let page = 0, activeGroup = -1, visibleTotal = 0, busy = false;
+  let importing = false;
+  const sourceInfo = { left: null, right: null };
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform || '');
+  $('shortcutKey').textContent = isMac ? '⌘' : 'Ctrl';
+
+  function number(value) { return Number(value).toLocaleString('zh-CN'); }
+  function fileSize(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`;
+    if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(bytes < 10 * 1024 ** 2 ? 1 : 0)} MB`;
+    return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  }
+  function lineCount(text) {
+    if (!text) return 0;
+    let count = 1;
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      if (code === 10) count++;
+      else if (code === 13) {
+        count++;
+        if (text.charCodeAt(i + 1) === 10) i++;
+      }
+    }
+    return count;
+  }
+  function updateSourceLabel(side) {
+    const element = $(side === 'left' ? 'leftSource' : 'rightSource');
+    const info = sourceInfo[side];
+    if (!info) {
+      element.textContent = side === 'left' ? 'ORIGINAL' : 'MODIFIED';
+      element.removeAttribute('title');
+      return;
+    }
+    element.textContent = `${info.name} · ${fileSize(info.size)}`;
+    element.title = info.path || info.name;
+  }
+  function updateCounts() {
+    clearTimeout(countTimer);
+    $('leftCount').textContent = `${number(leftInput.value.length)} 字符 · ${number(lineCount(leftInput.value))} 行`;
+    $('rightCount').textContent = `${number(rightInput.value.length)} 字符 · ${number(lineCount(rightInput.value))} 行`;
+    const empty = !leftInput.value && !rightInput.value;
+    $('swapBtn').disabled = empty; $('clearBtn').disabled = empty;
+  }
+  function scheduleCounts(immediate = false) {
+    clearTimeout(countTimer);
+    if (immediate) updateCounts();
+    else count
