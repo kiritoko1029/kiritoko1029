@@ -1,0 +1,56 @@
+Timer = setTimeout(updateCounts, 160);
+  }
+  function toast(message, error = false, duration) {
+    clearTimeout(toastTimer);
+    $('toast').textContent = message;
+    $('toast').classList.toggle('error', error);
+    $('toast').hidden = false;
+    toastTimer = setTimeout(() => { $('toast').hidden = true; }, duration || (error ? 6500 : 3600));
+  }
+  function setProgress(stage, progress) {
+    if (!busy) return;
+    const percentage = Math.max(1, Math.min(99, Math.round((progress || 0) * 100)));
+    $('compareLabel').textContent = `${stage || '正在对比'} ${percentage}%`;
+    $('liveStatus').textContent = `${stage || '正在对比'}，${percentage}%`;
+  }
+  function setBusy(value) {
+    busy = value;
+    $('compareBtn').setAttribute('aria-busy', String(value));
+    $('compareBtn').classList.toggle('is-cancel', value);
+    $('compareBtn').title = value ? '点击取消当前对比' : '';
+    $('compareLabel').textContent = value ? '正在准备…' : '开始对比';
+    $('compareIcon').classList.toggle('spinning', value);
+    $('compareIcon').querySelector('use').setAttribute('href', value ? '#i-loader' : '#i-compare');
+  }
+  function disposeWorker() {
+    if (worker) { worker.terminate(); worker = null; }
+    if (workerUrl) { URL.revokeObjectURL(workerUrl); workerUrl = null; }
+  }
+  function cancelPending(showMessage = false) {
+    const wasBusy = busy;
+    taskId++;
+    disposeWorker();
+    setBusy(false);
+    if (showMessage && wasBusy) {
+      toast('已取消本次对比，文本仍然保留。');
+      $('liveStatus').textContent = '已取消本次对比。';
+    }
+  }
+  function invalidate(message = '文本已更新，重新对比以查看差异。') {
+    cancelPending(false);
+    if (state) {
+      state = null; $('diffRows').replaceChildren();
+      $('results').hidden = true; $('emptyState').hidden = false;
+      $('emptyTitle').textContent = '准备好新的对比';
+      $('emptyDescription').textContent = message;
+      $('liveStatus').textContent = message;
+    }
+    scheduleCounts();
+  }
+  function options() {
+    return { mode: document.querySelector('input[name="mode"]:checked').value, ignoreSpace: $('ignoreSpace').checked, ignoreCase: $('ignoreCase').checked };
+  }
+  function optionDescription(opts) {
+    const values = [opts.mode === 'line' ? '整行对比' : '字符级对比'];
+    if (opts.ignoreSpace) values.push('忽略行内空白');
+    if (opts.ignoreCase
